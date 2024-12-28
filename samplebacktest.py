@@ -13,6 +13,19 @@ class MyBacktest(BacktestEngine):
         # Custom preprocessing logic
         self.data_stream['moving_avg'] = self.data_stream['close'].rolling(window=100).mean()
 
+    def before_step(self, index, row):
+        """
+        Hook for logic to execute before processing each row.
+        Default implementation handles TP/SL triggers.
+        """
+        super().before_step(index, row)  # Retain TP/SL logic
+
+        # Additional pre-step actions
+        # adding flags to see if k moved above d
+        self.states['kd_up'] = 1 if row.K > row.D else 0
+
+
+
     def strategy(self, row):
         # position size
         position_size = 100
@@ -34,12 +47,6 @@ class MyBacktest(BacktestEngine):
         elif row.close < row.moving_avg:
             if short_position is None:
                 self.position_book.open_short_position(quantity=qty, open_price=row.close, tag="short1", open_time=row.Index, tp=short_tp, sl=short_sl)
-
-    def before_step(self, index, row):
-        # Custom logic before step
-        super().before_step(index, row)  # Retain TP/SL logic
-        # Additional pre-step actions
-        print(f"Processing row {index} with close price {row.close}")
 
 
 if __name__ == "__main__":

@@ -1,3 +1,6 @@
+from concurrent.futures import ProcessPoolExecutor
+
+from tqdm import tqdm
 from .position_book import PositionBook
 import itertools
 import numpy as np
@@ -25,7 +28,7 @@ class BacktestEngine(ABC):
     def preprocess_data(self):
         # optional if you want to preprocess the data before running the backtest
         # else you can directly pass in the dataframe via add_data_stream
-        pass
+        return self.data_stream
     
     @abstractmethod
     def strategy(self):
@@ -47,9 +50,9 @@ class BacktestEngine(ABC):
         Executes the backtest by iterating through the data stream.
         """
         assert self.data_stream is not None, "Data stream must be added before running the backtest"
-        self.preprocess_data()
+        df = self.preprocess_data()
         self.has_run = True
-        for i, row in enumerate(self.data_stream.itertuples()):
+        for i, row in enumerate(df.itertuples()):
             self.before_step(i, row)
             self.strategy(row)
             self.after_step(i, row)
@@ -61,17 +64,33 @@ class BacktestEngine(ABC):
     def get_trading_stats(self):
         return self.position_book.trade_history.get_stats()
     
+    def evaluate_combination(self, param_values, optimize_target):
+        """
+        Evaluates a single parameter combination by running the backtest.
+        """
+        params = dict(zip(self.param_names, param_values))
+        self.states["params"] = params
+
+        # Reset and run the backtest
+        position_book = PositionBook(self.commission)  # Reset the position book
+        self.position_book = position_book
+        self.has_run = False
+        self.run()
+
+        # Get stats and evaluate the target metric
+        stats = self.get_trading_stats()
+        target_value = stats.get(optimize_target, float("-inf"))
+
+        return params, target_value, stats, position_book.trade_history
 
     def optimize(self, param_choices: dict, optimize_target: str = "sharpe_ratio", constraints=None):
         """
-        Optimizes the strategy parameters using grid search.
+        Optimizes the strategy parameters using grid search with parallel processing.
 
         Args:
             param_choices (dict): Dictionary of parameter names and their possible values.
-                Example: {"ADX_threshold": range(10, 30, 5), "tp_pct": [0.05, 0.1, 0.2]}
             optimize_target (str): The metric to maximize. Default is "sharpe_ratio".
-            constraints (callable, optional): A function that takes a parameter dictionary and returns
-                True if the combination is valid, False otherwise. Default is None.
+            constraints (callable, optional): A function that checks if a parameter combination is valid.
 
         Returns:
             dict: Best parameters and their corresponding stats.
@@ -80,45 +99,41 @@ class BacktestEngine(ABC):
         assert not self.has_run, "Engine must be reset before optimization."
 
         # Generate all parameter combinations
-        param_names = list(param_choices.keys())
+        self.param_names = list(param_choices.keys())  # Store for evaluate_combination
         param_combinations = list(itertools.product(*param_choices.values()))
 
+        if constraints:
+            param_combinations = [combo for combo in param_combinations if constraints(dict(zip(self.param_names, combo)))]
+
+        # Initialize tracking
         best_params = None
         best_target_value = float("-inf")
         best_stats = None
         best_trade_history = None
 
-        # Iterate through all parameter combinations
-        for param_values in param_combinations:
-            # Set parameters in the engine state
-            params = dict(zip(param_names, param_values))
+        # Run parameter combinations in parallel
+        with ProcessPoolExecutor() as executor:
+            with tqdm(total=len(param_combinations), desc="Optimizing Parameters") as pbar:
+                futures = [
+                    executor.submit(self.evaluate_combination, combo, optimize_target)
+                    for combo in param_combinations
+                ]
+                for future in futures:
+                    params, target_value, stats, trade_history = future.result()
+                    pbar.update(1)
 
-            # Check constraints (if provided)
-            if constraints and not constraints(params):
-                continue  # Skip invalid combinations
-
-            self.states["params"] = params
-
-            # Reset and run the backtest
-            self.position_book = PositionBook(self.commission)  # Reset the position book
-            self.has_run = False
-            self.run()
-
-            # Get stats and evaluate the target metric
-            stats = self.get_trading_stats()
-            target_value = stats.get(optimize_target, float("-inf"))
-
-            # Update the best parameters if this combination is better
-            if target_value > best_target_value:
-                best_params = params
-                best_target_value = target_value
-                best_stats = stats
-                best_trade_history = self.position_book.trade_history
+                    # Update best result
+                    if target_value > best_target_value:
+                        best_params = params
+                        best_target_value = target_value
+                        best_stats = stats
+                        best_trade_history = trade_history
 
         # Update the position_book with the best trade history for future plotting
         if best_trade_history is not None:
             self.position_book.trade_history = best_trade_history
-
+        
+        self.has_run = True
         return {
             "best_params": best_params,
             "best_target_value": best_target_value,
