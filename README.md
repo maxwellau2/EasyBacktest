@@ -1,179 +1,209 @@
-# Easy Backtest Library
+# EasyBacktest Framework
 
 ## Overview
-The **Easy Backtest Library** is a Python-based framework designed for developing, running, and optimizing trading strategies. By leveraging its modular architecture, traders and developers can easily test and analyze trading ideas without reinventing the wheel. This library supports position management, trade history tracking, parameter optimization, and comprehensive data visualization.
+
+The **EasyBacktest Framework** is a Python-based library designed to help traders and developers test, evaluate, and optimize trading strategies. With its modular design, it supports the rapid development of custom strategies, grid search optimization for parameters, and detailed trade analysis. It’s built to minimize redundancy while providing flexibility and comprehensive tools for trade evaluation.
 
 ---
 
 ## Features
 
 ### Core Features
-- **Position Management**:
-  - Open and close long/short positions.
-  - Supports take-profit (TP) and stop-loss (SL) levels.
-- **Trade History Tracking**:
-  - Logs all executed trades with details.
-  - Provides a complete trade history in a Pandas DataFrame.
-- **Performance Metrics**:
-  - Calculates statistics such as:
-    - Total Profit/Loss
-    - Win Rate
-    - Sharpe Ratio
-    - Profit Factor
-    - Maximum Drawdown
-    - Expectancy
-  - Supports custom annualization factors for metrics.
-- **Customizable Strategies**:
-  - Create strategies by implementing custom logic in the `strategy` method.
-  - Flexible hooks for preprocessing data and defining logic before and after each step.
-- **Data Visualization**:
-  - OHLC candlestick chart with trade markers.
-  - Cumulative PnL visualization.
-  - Trade statistics table.
-- **Parameter Optimization**:
-  - Perform grid search optimization on strategy parameters.
-  - Supports constraints for parameter combinations.
+
+-   **Position Management**:
+    -   Open and close long/short positions with optional take-profit (TP) and stop-loss (SL) levels.
+    -   Calculate real-time profit and loss (PnL) for all open positions.
+-   **Trade History Tracking**:
+    -   Logs all trades into a history for detailed performance analysis.
+    -   Outputs a trade history as a Pandas DataFrame for further insights.
+-   **Parameter Optimization**:
+    -   Optimizes strategy parameters using grid search and parallel processing.
+    -   Supports constraints to reduce the search space and speed up optimization.
+-   **Pre- and Post-Step Hooks**:
+    -   Add custom logic before or after each row of data is processed.
+-   **Customizable Strategies**:
+    -   Define trading strategies by implementing the `strategy` method.
+    -   Use the `preprocess_data` method to prepare your data for backtesting.
+-   **Data Visualization**:
+    -   Candlestick charting with trade annotations.
+    -   Cumulative profit and loss visualization.
+    -   Detailed trade statistics table.
 
 ---
 
 ## Installation
 
 1. Clone the repository:
-```bash
-git clone https://github.com/maxwellau2/EasyBacktest.git
-```
+    ```bash
+    git clone https://github.com/maxwellau2/EasyBacktest.git
+    ```
 2. Navigate to the project directory:
-```bash
-cd EasyBacktest
-```
+    ```bash
+    cd EasyBacktest
+    ```
 3. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
+    ```bash
+    pip install -r requirements.txt
+    ```
 
 ---
 
 ## Getting Started
 
 ### 1. Define a Custom Backtest
-Start by inheriting from the `BacktestEngine` class and implementing your own methods. The two most critical methods are:
-- `preprocess_data`: For data preprocessing.
-- `strategy`: Defines the core trading logic.
+
+To create your own strategy, subclass the `BacktestEngine` and implement the `strategy` and optional `preprocess_data` methods.
 
 ```python
-from easy_backtest.backtest_engine import BacktestEngine
+from backtest_framework.backtest_engine import BacktestEngine
 
-class MyBacktest(BacktestEngine):
+class MovingAverageCrossover(BacktestEngine):
     def preprocess_data(self):
-        # Add a 100-period moving average to the data stream
-        self.data_stream['moving_avg'] = self.data_stream['close'].rolling(window=100).mean()
+        self.data_stream["short_ma"] = self.data_stream["close"].rolling(window=10).mean()
+        self.data_stream["long_ma"] = self.data_stream["close"].rolling(window=30).mean()
 
     def strategy(self, row):
-        position_size = 100
-        qty = position_size / row.close
-        long_tp = row.close * 1.1
-        long_sl = row.close * 0.95
-
-        # Open a long position if the close price is above the moving average
-        if row.close > row.moving_avg:
-            self.position_book.open_long_position(quantity=qty, open_price=row.close, tp=long_tp, sl=long_sl, open_time=row.Index)
+        long_position = self.position_book.get_position_by_tag("long")
+        if row.short_ma > row.long_ma and not long_position:
+            # Open long position
+            tp = row.close * 1.02  # Take Profit at 2% increase
+            sl = row.close * 0.98  # Stop Loss at 2% decrease
+            self.position_book.open_long_position(quantity=1, open_price=row.close, tp=tp, sl=sl, open_time=row.Index)
+        elif row.short_ma < row.long_ma and long_position:
+            # Close long position
+            self.position_book.close_position(tag="long", close_price=row.close, close_time=row.Index)
 ```
 
+---
+
 ### 2. Fetch Market Data
-You can use any data source that outputs a Pandas DataFrame with the required columns: `open`, `high`, `low`, `close`, and `volume`. The example below uses Yahoo Finance.
+
+Use any source that provides a Pandas DataFrame with `open`, `high`, `low`, `close`, and `volume` columns. For example:
 
 ```python
 import yfinance as yf
-btc_data = yf.download('BTC-USD', start='2024-01-01', interval='1h')
+btc_data = yf.download("BTC-USD", start="2024-01-01", interval="1h")
 btc_data.columns = [col.lower() for col in btc_data.columns]  # Ensure lowercase column names
 ```
+
+---
 
 ### 3. Run the Backtest
 
 ```python
-backtest = MyBacktest(commission=0.01)
-backtest.add_data_stream(data_stream=btc_data)
-backtest.run()
-backtest.plot_trading_stats()
-results = backtest.get_trade_history().to_dataframe()
+# Initialize the engine and add data
+engine = MovingAverageCrossover(commission=0.001)
+engine.add_data_stream(btc_data)
+
+# Execute the backtest
+engine.run()
+
+# Visualize results
+engine.plot_trading_stats()
+
+# Access trade history
+results = engine.get_trade_history().to_dataframe()
 print(results)
 ```
 
+---
+
 ### 4. Optimize Parameters
-Perform parameter optimization to fine-tune your strategy. Define the parameter grid and target metric.
+
+To find the best-performing parameters, define a parameter grid and optimization constraints:
 
 ```python
 param_choices = {
-    "tp_pct": [0.05, 0.1, 0.2],
-    "sl_pct": [0.03, 0.05, 0.1]
+    "tp_pct": [0.01, 0.02, 0.03],
+    "sl_pct": [0.01, 0.02, 0.03],
+    "short_window": [10, 20],
+    "long_window": [30, 50]
 }
-result = backtest.optimize(param_choices, optimize_target="sharpe_ratio")
-print("Best Parameters:", result["best_params"])
+
+def constraints(params):
+    return params["short_window"] < params["long_window"] and params["tp_pct"] >= params["sl_pct"] * 0.8
+
+# Run optimization
+pareto_results = engine.optimize(
+    param_choices,
+    optimize_metrics=["sharpe_ratio"],
+    constraints=constraints
+)
 ```
 
 ---
 
-## Detailed Usage
+## Explanation of Key Functions
 
-### Backtest Workflow
-1. **Initialize the Engine**:
-   Create an instance of a class inheriting from `BacktestEngine`.
-2. **Add Data Stream**:
-   Add a Pandas DataFrame containing historical market data.
-3. **Define Strategy**:
-   Implement trading logic in the `strategy` method.
-4. **Run Backtest**:
-   Execute the backtest and visualize the results.
-5. **Optimize Parameters**:
-   Perform grid search on defined parameters.
+### `run()` Method
 
-### Key Classes
-- **`BacktestEngine`**:
-  The base class for running backtests. Extend this class to define your own strategies.
-- **`PositionBook`**:
-  Manages open positions and tracks executed trades.
-- **`TradeHistory`**:
-  Records trade details and computes performance metrics.
-- **`Position`**:
-  Represents an individual trade position.
-- **`PositionCollection`**:
-  Maintains a collection of all open positions.
+1. **Preprocess Data**: The `preprocess_data` method is called to prepare the data (e.g., calculate indicators).
+2. **Iterate Over Data**: Each row of the dataset is processed sequentially.
+3. **Before Step Hook**: Custom logic can be added before processing each row.
+4. **Strategy Execution**: The `strategy` method is called to evaluate trade conditions.
+5. **After Step Hook**: Post-row processing logic is executed.
 
-### Key Methods
-- `add_data_stream(data_stream)`: Adds a Pandas DataFrame containing market data.
-- `run()`: Executes the backtest.
-- `plot_trading_stats()`: Visualizes the backtest results.
-- `optimize(param_choices, optimize_target)`: Optimizes parameters using grid search.
+### `optimize()` Method
 
----
-
-## Examples
-
-### Basic Backtest
-Refer to `samplebacktest.py` for a moving average crossover strategy implementation.
-
-### Parameter Optimization
-See `sampleoptimize.py` for a detailed example of optimizing take-profit and stop-loss percentages.
+1. **Grid Search**: Generates all possible parameter combinations from the input grid.
+2. **Apply Constraints**: Filters out invalid combinations to reduce the search space.
+3. **Parallel Processing**: Distributes tasks across available CPU cores (utilizing at least 80% of resources).
+4. **Evaluate Performance**: Runs the backtest for each valid parameter set.
+5. **Pareto Analysis**: Identifies the best-performing parameter combinations based on specified metrics.
 
 ---
 
 ## Advanced Topics
 
-### Custom Hooks
-The `BacktestEngine` supports hooks for additional logic:
-- `before_step(index, row)`: Execute custom logic before processing each data point.
-- `after_step(index, row)`: Execute custom logic after processing each data point.
+### Managing Positions
 
-### Visualizing Trades
-The `plot_trading_stats` method generates:
-1. OHLC candlestick chart with trade markers.
-2. Cumulative PnL over time.
-3. Tabular summary of trade statistics.
+-   Open positions with optional take-profit and stop-loss levels:
+    ```python
+    self.position_book.open_long_position(
+        quantity=1,
+        open_price=row.close,
+        tp=row.close * 1.02,
+        sl=row.close * 0.98,
+        open_time=row.Index
+    )
+    ```
+-   Close positions:
+    ```python
+    self.position_book.close_position(
+        tag="long",
+        close_price=row.close,
+        close_time=row.Index
+    )
+    ```
+
+### Pre- and Post-Step Hooks
+
+-   **Before Step**: Use `before_step` to update states or evaluate conditions.
+-   **After Step**: Use `after_step` for cleanup or additional calculations.
+
+### Visualization
+
+Visualize trades, cumulative PnL, and trade stats:
+
+```python
+engine.plot_trading_stats()
+```
+
+---
+
+## Benefits of Using This Framework
+
+-   **Flexibility**: Easily adapt to new strategies and data sources.
+-   **Scalability**: Optimize strategies efficiently with parallel processing.
+-   **Transparency**: Detailed trade history and statistics provide insights into strategy performance.
+-   **Ease of Use**: Minimal boilerplate code required for complex strategies.
+-   **Customizability**: Designed to be easily extended and customized for specific trading strategies.
+-   **For more examples**: Check out HOWTO.md for more detailed examples.
 
 ---
 
 ## Contributing
-We welcome contributions! Please fork the repository, create a feature branch, and submit a pull request.
+
+We welcome contributions! Fork the repository, create a feature branch, and submit a pull request.
 
 ---
-
