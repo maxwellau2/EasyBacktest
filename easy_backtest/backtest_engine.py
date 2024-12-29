@@ -1,5 +1,6 @@
 from concurrent.futures import ProcessPoolExecutor
-
+import datetime
+import json
 from tqdm import tqdm
 from .position_book import PositionBook
 import itertools
@@ -64,7 +65,7 @@ class BacktestEngine(ABC):
     def get_trading_stats(self):
         return self.position_book.trade_history.get_stats()
     
-    def evaluate_combination(self, param_values, optimize_target):
+    def evaluate_combination(self, param_values):
         """
         Evaluates a single parameter combination by running the backtest.
         """
@@ -79,11 +80,31 @@ class BacktestEngine(ABC):
 
         # Get stats and evaluate the target metric
         stats = self.get_trading_stats()
-        target_value = stats.get(optimize_target, float("-inf"))
+        return {"params": params, **stats}
+    
+    def pareto_front(self, results, metrics):
+        """
+        Finds the Pareto front for multi-objective optimization.
 
-        return params, target_value, stats, position_book.trade_history
+        Args:
+            results (list): List of dictionaries containing parameter stats.
+            metrics (list): List of metrics to optimize.
 
-    def optimize(self, param_choices: dict, optimize_target: str = "sharpe_ratio", constraints=None):
+        Returns:
+            list: Pareto-optimal parameter sets.
+        """
+        pareto_set = []
+        for res in results:
+            dominated = False
+            for other in results:
+                if all(other[metric] >= res[metric] for metric in metrics) and any(other[metric] > res[metric] for metric in metrics):
+                    dominated = True
+                    break
+            if not dominated:
+                pareto_set.append(res)
+        return pareto_set
+
+    def optimize(self, param_choices: dict, optimize_metrics: list, constraints=None):
         """
         Optimizes the strategy parameters using grid search with parallel processing.
 
@@ -110,35 +131,23 @@ class BacktestEngine(ABC):
         best_target_value = float("-inf")
         best_stats = None
         best_trade_history = None
-
+        results = []
         # Run parameter combinations in parallel
         with ProcessPoolExecutor() as executor:
             with tqdm(total=len(param_combinations), desc="Optimizing Parameters") as pbar:
                 futures = [
-                    executor.submit(self.evaluate_combination, combo, optimize_target)
+                    executor.submit(self.evaluate_combination, combo)
                     for combo in param_combinations
                 ]
                 for future in futures:
-                    params, target_value, stats, trade_history = future.result()
+                    results.append(future.result())
                     pbar.update(1)
 
-                    # Update best result
-                    if target_value > best_target_value:
-                        best_params = params
-                        best_target_value = target_value
-                        best_stats = stats
-                        best_trade_history = trade_history
-
         # Update the position_book with the best trade history for future plotting
-        if best_trade_history is not None:
-            self.position_book.trade_history = best_trade_history
-        
-        self.has_run = True
-        return {
-            "best_params": best_params,
-            "best_target_value": best_target_value,
-            "best_stats": best_stats,
-        }
+        with open(f"optimization_results{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.json", "w") as json_file:
+            json.dump(results, json_file, indent=4)
+        pareto_set = self.pareto_front(results, optimize_metrics)
+        return pareto_set
     
     def plot_trading_stats(self):
         """

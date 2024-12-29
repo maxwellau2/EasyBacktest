@@ -1,4 +1,8 @@
-/venv
-/implementations
-/.pytest_cache
-*/__pycache__
+*
+!/.git
+!/.github
+!/easybacktest
+!/tests
+!Makefile
+!requirements.txt
+!README.md
