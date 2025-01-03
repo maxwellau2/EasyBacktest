@@ -67,14 +67,15 @@ class Position:
         remaining: the remaining quantity of the position
         """
         # check if close_amt is between 0 and 1
+        commision_amount = self.commission * self.quantity * close_amt * close_price
         if not (0 <= close_amt <= 1):
             raise ValueError("close_amt must be between 0 and 1")
         if self.is_long():
-            profit = (close_price - self.open_price) * self.quantity * close_amt * (1-self.commission)
-            pct = (close_price - self.open_price) / (self.open_price) * (1-self.commission)
+            profit = (close_price - self.open_price) * self.quantity * close_amt  - commision_amount
+            pct = profit/self.open_price
         else :
-            profit = (self.open_price - close_price) * self.quantity * close_amt * (1-self.commission)
-            pct = (self.open_price - close_price) / (self.open_price) * (1-self.commission)
+            profit = (self.open_price - close_price) * self.quantity * close_amt - commision_amount
+            pct = profit/self.open_price
         if close_amt == 1:
             return {"profit": profit, "pct": pct, "remaining": 0}
         self.quantity -= self.quantity * close_amt

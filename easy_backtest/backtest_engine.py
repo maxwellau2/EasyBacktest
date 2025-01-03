@@ -1,6 +1,7 @@
 from concurrent.futures import ProcessPoolExecutor
 import datetime
 import json
+import random
 from tqdm import tqdm
 from .position_book import PositionBook
 import itertools
@@ -11,13 +12,18 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 class BacktestEngine(ABC):
-    def __init__(self, commission: float):
+    def __init__(self, commission: float, portfolio_size: float=100):
         self.commission = commission
-        self.position_book = PositionBook(commission=commission)
+        # we store portfolio size in position book in order to calculate pnl based on portfolio size
+        self.position_book = PositionBook(commission=commission, portfolio_size=portfolio_size)
         self.data_stream = None
         self.has_run = False
         # use this to store any state information
         self.states = {}
+        self._portfolio_size = portfolio_size
+
+    def get_portfolio_size(self):
+        return self.position_book.get_portfolio_size()
 
     def add_data_stream(self, data_stream: pd.DataFrame):
         required_columns = {"open", "high", "low", "close", "volume"}
@@ -73,7 +79,7 @@ class BacktestEngine(ABC):
         self.states["params"] = params
 
         # Reset and run the backtest
-        position_book = PositionBook(self.commission)  # Reset the position book
+        position_book = PositionBook(self.commission, self._portfolio_size)  # Reset the position book
         self.position_book = position_book
         self.has_run = False
         self.run()
@@ -103,6 +109,76 @@ class BacktestEngine(ABC):
             if not dominated:
                 pareto_set.append(res)
         return pareto_set
+    
+    
+
+    def evaluate_and_store(self, param_combination, optimize_metrics):
+        """
+        Evaluates a single parameter combination and returns the results.
+
+        Args:
+            param_combination (tuple): A single combination of parameter values.
+            optimize_metrics (list): Metrics to optimize.
+            constraints (callable): Function to apply constraints to parameter combinations.
+
+        Returns:
+            dict: Results for the parameter combination.
+        """
+        params = dict(zip(self.param_names, param_combination))
+        # Example mock implementation for backtesting
+        # Replace this with actual backtesting logic
+        result = {
+            "params": params,
+            "metrics": {metric: random.uniform(0, 1) for metric in optimize_metrics},
+        }
+        return result
+
+    
+    def optimize_random(self, param_choices: dict, optimize_metrics: list, constraints=None, n_samples=1000):
+        """
+        Optimizes the strategy parameters using random search with parallel processing.
+
+        Args:
+            param_choices (dict): Dictionary of parameter names and their possible values.
+            optimize_metrics (list): Metrics to optimize.
+            constraints (callable, optional): A function that checks if a parameter combination is valid.
+            n_samples (int): Number of random samples to evaluate.
+
+        Returns:
+            list: Pareto-optimal results.
+        """
+        assert self.data_stream is not None, "Data stream must be added before optimizing."
+
+        self.param_names = list(param_choices.keys())
+        param_combinations = list(itertools.product(*param_choices.values()))
+
+        if constraints:
+            all_combinations = [combo for combo in param_combinations if constraints(dict(zip(self.param_names, combo)))]
+
+        # Randomly select parameter combinations
+        sampled_combinations = random.sample(all_combinations, min(n_samples, len(all_combinations)//10))
+
+        results = []
+        print(f"{len(sampled_combinations)} random combinations to test, please wait...")
+
+        with ProcessPoolExecutor() as executor:
+            with tqdm(total=len(sampled_combinations), desc="Optimizing Parameters") as pbar:
+                futures = [
+                    executor.submit(self.evaluate_combination, combo)
+                    for combo in sampled_combinations
+                ]
+                for future in futures:
+                    results.append(future.result())
+                    pbar.update(1)
+
+        # Save results to a JSON file
+        with open(f"optimization_results_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.json", "w") as json_file:
+            json.dump(results, json_file, indent=4)
+
+        # Extract Pareto-optimal results
+        pareto_set = self.pareto_front(results, optimize_metrics)
+        return pareto_set
+
 
     def optimize(self, param_choices: dict, optimize_metrics: list, constraints=None):
         """
@@ -117,7 +193,7 @@ class BacktestEngine(ABC):
             dict: Best parameters and their corresponding stats.
         """
         assert self.data_stream is not None, "Data stream must be added before optimizing."
-        assert not self.has_run, "Engine must be reset before optimization."
+        # assert not self.has_run, "Engine must be reset before optimization."
 
         # Generate all parameter combinations
         self.param_names = list(param_choices.keys())  # Store for evaluate_combination
@@ -132,6 +208,7 @@ class BacktestEngine(ABC):
         best_stats = None
         best_trade_history = None
         results = []
+        print(f"{len(param_combinations)} combinations to test, please wait...")
         # Run parameter combinations in parallel
         with ProcessPoolExecutor() as executor:
             with tqdm(total=len(param_combinations), desc="Optimizing Parameters") as pbar:
