@@ -78,16 +78,14 @@ class TradeHistory:
             "close_time": trade.close_time
         } for trade in self.trades])
 
-    def get_stats(self, annualization_factor: float = 365 * 24):
+    def get_stats(self, initial_portfolio: float, annualization_factor: float = 1):
         """
         Calculates various statistics to evaluate the trading strategy.
-        annualization_factor: the factor to annualize the profit and loss values, defaults to 365 * 24 for hourly data
+        annualization_factor: the factor to annualize the profit and loss values, defaults 1
 
         Returns:
             dict: Dictionary containing calculated metrics.
         """
-        # get the timeframe of the datastream for annualization
-
         df = self.to_dataframe()
 
         if df.empty:
@@ -107,7 +105,8 @@ class TradeHistory:
                 "avg_consecutive_wins": 0.0,
                 "avg_consecutive_losses": 0.0,
                 "expectancy": 0.0,
-                "max_drawdown_percent": 0.0
+                "max_drawdown_percent": 0.0,
+                "average_holding_period": 0.0,
             }
 
         # Metrics calculations
@@ -139,7 +138,7 @@ class TradeHistory:
 
         # Sharpe Ratio (simplified, assuming risk-free rate = 0)
         if total_trades > 1:
-            sharpe_ratio = df["profit"].mean() / df["profit"].std() * np.sqrt(annualization_factor)
+            sharpe_ratio = (df["profit"].mean() / df["profit"].std()) * np.sqrt(annualization_factor)
         else:
             sharpe_ratio = 0.0
 
@@ -147,13 +146,16 @@ class TradeHistory:
         expectancy = (win_rate * average_win) + ((1 - win_rate) * average_loss)
 
         # Adjusted Max Drawdown %
-        df["cumulative_pnl"] = df["profit"].cumsum()
-        df["peak_pnl"] = df["cumulative_pnl"].cummax()
-        df["drawdown"] = df["cumulative_pnl"] - df["peak_pnl"]
+        df["portfolio_value"] = initial_portfolio + df["profit"].cumsum()
+        df["peak_portfolio"] = df["portfolio_value"].cummax()
+        df["drawdown"] = df["portfolio_value"] - df["peak_portfolio"]
+        df["drawdown_percent"] = (df["drawdown"] / df["peak_portfolio"]) * 100
 
-        # Avoid division by zero; handle cases where peak_pnl == 0
+        max_drawdown_percent = df["drawdown_percent"].min()
 
-        max_drawdown_percent = df["drawdown"].min()  # Min value represents the largest drawdown
+        # average holding period
+        average_holding_period = (df["close_time"] - df["open_time"]).mean()
+
 
         stats = {
             "total_trades": total_trades,
@@ -162,6 +164,7 @@ class TradeHistory:
             "expectancy": expectancy,
             "sharpe_ratio": sharpe_ratio,
             "max_drawdown_percent": max_drawdown_percent,
+            "average_holding_period": average_holding_period,
             "average_profit": average_profit,
             "max_profit": max_profit,
             "max_loss": max_loss,
@@ -174,9 +177,8 @@ class TradeHistory:
             "avg_consecutive_losses": avg_consecutive_losses,
         }
 
-        # Convert numpy types to native Python types
-        stats = self._convert_types(stats)
-        return stats
+        return self._convert_types(stats)
+
 
 
 

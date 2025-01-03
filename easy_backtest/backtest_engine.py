@@ -17,6 +17,7 @@ class BacktestEngine(ABC):
         # we store portfolio size in position book in order to calculate pnl based on portfolio size
         self.position_book = PositionBook(commission=commission, portfolio_size=portfolio_size)
         self.data_stream = None
+        self.other_data_steams = {}
         self.has_run = False
         # use this to store any state information
         self.states = {}
@@ -31,6 +32,9 @@ class BacktestEngine(ABC):
         assert not missing_columns, f"Data stream must contain the following columns: {missing_columns}"
         assert isinstance(data_stream, pd.DataFrame), "Data stream must be a Pandas DataFrame"
         self.data_stream = data_stream
+
+    def add_other_data_stream(self, data_stream: pd.DataFrame, name: str):
+        self.other_data_steams[name] = data_stream
 
     def preprocess_data(self):
         # optional if you want to preprocess the data before running the backtest
@@ -69,7 +73,7 @@ class BacktestEngine(ABC):
         return self.position_book.trade_history
 
     def get_trading_stats(self):
-        return self.position_book.trade_history.get_stats()
+        return self.position_book.trade_history.get_stats(initial_portfolio=self._portfolio_size)
     
     def evaluate_combination(self, param_values):
         """
@@ -239,7 +243,7 @@ class BacktestEngine(ABC):
         trading_stats = self.get_trading_stats()
 
         # Calculate cumulative PnL
-        trade_history_df["cumulative_pnl"] = trade_history_df["profit"].cumsum()
+        trade_history_df["cumulative_pnl"] = trade_history_df["profit"].cumsum() + self._portfolio_size
 
         # Create subplots with 3 rows: one for OHLC, one for cumulative PnL, and one for the table
         fig = make_subplots(

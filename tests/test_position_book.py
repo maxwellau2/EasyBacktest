@@ -5,7 +5,7 @@ from easy_backtest.position import Position
 
 def test_open_long_position():
     # Test opening a long position
-    book = PositionBook(commission=0.01)
+    book = PositionBook(commission=0.0006, portfolio_size=100)
     book.open_long_position(quantity=10, open_price=100.0, tag="pos1")
 
     assert len(book.position_collection) == 1
@@ -17,7 +17,7 @@ def test_open_long_position():
 
 def test_open_short_position():
     # Test opening a short position
-    book = PositionBook(commission=0.01)
+    book = PositionBook(commission=0.0006, portfolio_size=100)
     book.open_short_position(quantity=5, open_price=150.0, tag="pos2")
 
     assert len(book.position_collection) == 1
@@ -29,12 +29,12 @@ def test_open_short_position():
 
 def test_close_position_full():
     # Test closing a position fully
-    book = PositionBook(commission=0.01)
+    book = PositionBook(commission=0.0006, portfolio_size=100)
     book.open_long_position(quantity=10, open_price=100.0, tag="pos1")
 
     result = book.close_position(tag="pos1", close_price=110.0, close_amt=1)
     assert len(book.position_collection) == 0  # Position should be removed
-    assert result["profit"] == pytest.approx(99.0)  # Profit = (110 - 100) * 10 * (1 - 0.01)
+    assert result["profit"] == pytest.approx(99.34)  # Profit = (110 - 100) * 10 * (1 - 0.01)
 
     # Verify trade history
     assert len(book.trade_history.trades) == 1
@@ -42,11 +42,11 @@ def test_close_position_full():
     assert trade.tag == "pos1"
     assert trade.mode == "long"
     assert trade.quantity == 10
-    assert trade.profit == pytest.approx(99.0)
+    assert trade.profit == pytest.approx(99.34)
 
 def test_close_position_partial():
     # Test closing a position partially
-    book = PositionBook(commission=0.01)
+    book = PositionBook(commission=0.0006, portfolio_size=100)
     book.open_short_position(quantity=10, open_price=150.0, tag="pos2")
 
     result = book.close_position(tag="pos2", close_price=140.0, close_amt=0.5)
@@ -60,21 +60,21 @@ def test_close_position_partial():
     assert trade.tag == "pos2"
     assert trade.mode == "short"
     assert trade.quantity == 5  # Quantity closed
-    assert trade.profit == pytest.approx(49.5)  # Profit = (150 - 140) * 5 * (1 - 0.01)
+    assert trade.profit == pytest.approx(49.58)  # Profit = (150 - 140) * 5 * (1 - 0.01)
 
 def test_get_all_pnls():
     # Test getting PnL for all positions
-    book = PositionBook(commission=0.01)
+    book = PositionBook(commission=0.0006, portfolio_size=100)
     book.open_long_position(quantity=10, open_price=100.0, tag="pos1")
     book.open_short_position(quantity=5, open_price=150.0, tag="pos2")
 
     pnls = book.get_all_pnls(current_price=110.0)
-    assert pnls["pos1"]["profit"] == pytest.approx(99.0)  # (110 - 100) * 10 * (1 - 0.01)
-    assert pnls["pos2"]["profit"] == pytest.approx(198.0)  # (150 - 110) * 5 * (1 - 0.01)
+    assert pnls["pos1"]["profit"] == pytest.approx(99.94)  # (110 - 100) * 10 * (1 - 0.01)
+    assert pnls["pos2"]["profit"] == pytest.approx(199.88)  # (150 - 110) * 5 * (1 - 0.01)
 
 def test_incur_tp_sl():
     # Test closing positions based on TP and SL
-    book = PositionBook(commission=0.01)
+    book = PositionBook(commission=0.0006, portfolio_size=100)
     pos1 = Position(quantity=10, open_price=100.0, commission=0.01, mode="long", tag="pos1", tp=110.0, sl=90.0)
     pos2 = Position(quantity=5, open_price=150.0, commission=0.01, mode="short", tag="pos2", tp=110.0, sl=160.0)
     book.position_collection.add_position(pos1)
@@ -90,8 +90,8 @@ def test_incur_tp_sl():
     assert len(book.trade_history.trades) == 2
     trade1 = book.trade_history.trades[0]
     assert trade1.tag == "pos1"
-    assert trade1.profit == pytest.approx(99.0)  # (110 - 100) * 10 * (1 - 0.01)
+    assert trade1.profit == pytest.approx(89.0)  # (110 - 100) * 10 * (1 - 0.01)
 
     trade2 = book.trade_history.trades[1]
     assert trade2.tag == "pos2"
-    assert trade2.profit == pytest.approx(198.0)  # (150 - 110) * 5 * (1 - 0.01)
+    assert trade2.profit == pytest.approx(194.5)  # (150 - 110) * 5 * (1 - 0.01)
