@@ -138,7 +138,27 @@ class TradeHistory:
 
         # Sharpe Ratio (simplified, assuming risk-free rate = 0)
         if total_trades > 1:
-            sharpe_ratio = (df["profit"].mean() / df["profit"].std()) * np.sqrt(annualization_factor)
+            # Ensure open_time and close_time are datetime objects
+            df['open_time'] = pd.to_datetime(df['open_time'])
+            df['close_time'] = pd.to_datetime(df['close_time'])
+
+            # Calculate the duration of each trade in days
+            df['trade_duration_days'] = (df['close_time'] - df['open_time']).dt.total_seconds() / (24 * 60 * 60)
+
+            # Calculate percentage change in profit
+            df['profit_pct_change'] = df['profit'].pct_change().dropna()
+
+            # Calculate annualized return
+            total_profit = df['profit'].sum()
+            total_duration = df['trade_duration_days'].sum()
+            annualized_return = (total_profit / initial_portfolio) * (365 / total_duration)
+
+            # Calculate annualized standard deviation
+            daily_std_dev = df['profit_pct_change'].std()
+            annualized_std_dev = daily_std_dev * np.sqrt(365)
+
+            # Calculate Sharpe Ratio
+            sharpe_ratio = (annualized_return / annualized_std_dev) * np.sqrt(365)
         else:
             sharpe_ratio = 0.0
 
@@ -178,9 +198,6 @@ class TradeHistory:
         }
 
         return self._convert_types(stats)
-
-
-
 
     def __repr__(self):
         return f"TradeHistory(trades={self.trades})"
