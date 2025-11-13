@@ -9,16 +9,18 @@
 !HOWTO.md
 !setup.py
 !build.sh
-!dist
 # !CLAUDE.md
 # !*.md
+!dist/
 
-# # Ignore build artifacts
-# build/
-# dist/
-# *.egg-info
-# __pycache__/
-# *.pyc
-# *.pyo
-# .coverage
-# *.whl
+# Ignore build artifacts
+build/
+*.egg-info
+__pycache__/
+*.pyc
+*.pyo
+.coverage
+
+# Allow wheel files in dist/ folder
+!dist/*.whl
+!dist/*.tar.gz
