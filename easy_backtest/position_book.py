@@ -69,18 +69,21 @@ class PositionBook:
     def incur_tp_sl(self, current_close: float, current_high: float, current_low: float, current_open: float, current_time: datetime):
         """Closes positions based on take profit (TP) and stop loss (SL)."""
         for pos in list(self.position_collection):
-            if pos.tp is not None and pos.sl is not None:
-                if pos.is_long() and (current_high >= pos.tp or current_low <= pos.sl):
-                    # assuming stop loss is incurred first, to simulate pessimistic results
-                    if current_low <= pos.sl:
-                        self.close_position(tag=pos.tag, close_price=pos.sl, close_amt=1, close_time=current_time)
-                    elif current_high >= pos.tp:
-                        self.close_position(tag=pos.tag, close_price=pos.tp, close_amt=1, close_time=current_time)
-                elif pos.is_short() and (current_low <= pos.tp or current_high >= pos.sl):
-                    if current_high >= pos.sl:
-                        self.close_position(tag=pos.tag, close_price=pos.sl, close_amt=1, close_time=current_time)
-                    elif current_low <= pos.tp:
-                        self.close_position(tag=pos.tag, close_price=pos.tp, close_amt=1, close_time=current_time)
+            # Check stop loss first
+            if pos.sl is not None:
+                if pos.is_long() and current_low <= pos.sl:
+                    self.close_position(tag=pos.tag, close_price=pos.sl, close_amt=1, close_time=current_time)
+                    continue  # Position closed, skip TP check
+                elif pos.is_short() and current_high >= pos.sl:
+                    self.close_position(tag=pos.tag, close_price=pos.sl, close_amt=1, close_time=current_time)
+                    continue  # Position closed, skip TP check
+            
+            # Check take profit if position wasn't closed by SL
+            if pos.tp is not None:
+                if pos.is_long() and current_high >= pos.tp:
+                    self.close_position(tag=pos.tag, close_price=pos.tp, close_amt=1, close_time=current_time)
+                elif pos.is_short() and current_low <= pos.tp:
+                    self.close_position(tag=pos.tag, close_price=pos.tp, close_amt=1, close_time=current_time)
 
     def __repr__(self):
         return f"Positions(position_collection={self.position_collection}, trade_history={self.trade_history})"

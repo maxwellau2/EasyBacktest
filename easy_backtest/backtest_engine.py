@@ -32,6 +32,8 @@ class BacktestEngine(ABC):
         assert not missing_columns, f"Data stream must contain the following columns: {missing_columns}"
         assert isinstance(data_stream, pd.DataFrame), "Data stream must be a Pandas DataFrame"
         self.data_stream = data_stream
+        print("DATA STREAM ADDED")
+        print(self.data_stream.head())
 
     def add_other_data_stream(self, data_stream: pd.DataFrame, name: str):
         self.other_data_steams[name] = data_stream
@@ -42,7 +44,7 @@ class BacktestEngine(ABC):
         return self.data_stream
     
     @abstractmethod
-    def strategy(self):
+    def strategy(self, row):
         pass
 
     def before_step(self, index, row):
@@ -62,6 +64,7 @@ class BacktestEngine(ABC):
         """
         assert self.data_stream is not None, "Data stream must be added before running the backtest"
         df = self.preprocess_data()
+        print(f"DF: {df}")
         self.has_run = True
         for i, row in enumerate(df.itertuples()):
             self.before_step(i, row)
@@ -72,8 +75,48 @@ class BacktestEngine(ABC):
     def get_trade_history(self):
         return self.position_book.trade_history
 
+    def _infer_periods_per_year(self):
+        """
+        Infer the number of trading periods per year from the data stream
+        by calculating the median time difference between consecutive rows.
+
+        Returns:
+            int: Estimated number of periods per year
+        """
+        if self.data_stream is None or len(self.data_stream) < 2:
+            return 365  # Default to daily if we can't infer
+
+        # Calculate time differences between consecutive rows
+        time_index = pd.Series(self.data_stream.index)
+        time_diffs = time_index.diff().dropna()
+
+        if len(time_diffs) == 0:
+            return 365  # Default to daily
+
+        # Use median to be robust against gaps/outliers
+        median_diff = time_diffs.median()
+
+        # Convert to periods per year
+        # Total seconds in a year (accounting for leap years)
+        seconds_per_year = 365.25 * 24 * 60 * 60
+
+        # Calculate periods per year
+        if hasattr(median_diff, 'total_seconds'):
+            seconds_per_period = median_diff.total_seconds()
+        else:
+            # Handle numpy.timedelta64
+            seconds_per_period = median_diff / np.timedelta64(1, 's')
+
+        periods_per_year = int(seconds_per_year / seconds_per_period)
+
+        return periods_per_year
+
     def get_trading_stats(self):
-        return self.position_book.trade_history.get_stats(initial_portfolio=self._portfolio_size)
+        periods_per_year = self._infer_periods_per_year()
+        return self.position_book.trade_history.get_stats(
+            initial_portfolio=self._portfolio_size,
+            periods_per_year=periods_per_year
+        )
     
     def evaluate_combination(self, param_values):
         """
@@ -157,10 +200,10 @@ class BacktestEngine(ABC):
         param_combinations = list(itertools.product(*param_choices.values()))
 
         if constraints:
-            all_combinations = [combo for combo in param_combinations if constraints(dict(zip(self.param_names, combo)))]
+            param_combinations = [combo for combo in param_combinations if constraints(dict(zip(self.param_names, combo)))]
 
         # Randomly select parameter combinations
-        sampled_combinations = random.sample(all_combinations, min(n_samples, len(all_combinations)//10))
+        sampled_combinations = random.sample(param_combinations, min(n_samples, len(param_combinations)//10))
 
         results = []
         print(f"{len(sampled_combinations)} random combinations to test, please wait...")
@@ -230,10 +273,16 @@ class BacktestEngine(ABC):
         pareto_set = self.pareto_front(results, optimize_metrics)
         return pareto_set
     
-    def plot_trading_stats(self):
+    def plot_trading_stats(self, table_format="multi_row"):
         """
         Plots an OHLC chart with trades represented as red (short) or green (long) dotted lines,
         displays cumulative PnL as a subplot, and shows trading stats in a table format below the chart.
+
+        Args:
+            table_format (str): Format for stats table. Options:
+                - "single_row" - All metrics in one horizontal row (original)
+                - "multi_row" - Metrics grouped into multiple rows by category (easier to read)
+                - "two_column" - Vertical two-column layout with metric names and values
         """
         assert self.data_stream is not None, "Data stream must be added before plotting trades"
         assert self.has_run, "Backtest must be run before plotting trades"
@@ -245,14 +294,14 @@ class BacktestEngine(ABC):
         # Calculate cumulative PnL
         trade_history_df["cumulative_pnl"] = trade_history_df["profit"].cumsum() + self._portfolio_size
 
-        # Create subplots with 3 rows: one for OHLC, one for cumulative PnL, and one for the table
+        # Create subplots with 3 rows: one for cumulative PnL, one for OHLC, and one for the table
         fig = make_subplots(
             rows=3,
             cols=1,
             shared_xaxes=True,
-            vertical_spacing=0.1,
+            vertical_spacing=0.08,
             specs=[[{"type": "xy"}], [{"type": "xy"}], [{"type": "table"}]],
-            row_heights=[0.2, 0.6, 0.2]
+            row_heights=[0.15, 0.55, 0.30]  # More space for table
         )
 
         # Add OHLC candlestick chart
@@ -297,75 +346,165 @@ class BacktestEngine(ABC):
             col=1
         )
 
-        # Prepare trading stats for the table
-        headers = []
-        values = []
-        for key, value in trading_stats.items():
-            headers.append(key)
+        # Format stats based on selected table format
+        def format_value(value):
+            """Format numeric values for display"""
             if isinstance(value, (int, float)):
-                # Round to 4 significant figures using numpy
-                values.append(float(np.format_float_positional(value, precision=4, unique=False, fractional=False, trim="k")))
-            else:
-                # Keep non-numeric values unchanged
-                values.append(value)
+                if abs(value) < 0.01 and value != 0:
+                    return f"{value:.6f}"
+                elif abs(value) < 1:
+                    return f"{value:.4f}"
+                elif abs(value) < 100:
+                    return f"{value:.2f}"
+                else:
+                    return f"{value:.0f}"
+            return str(value)
 
-        # Add trading stats table
-        headers = []
-        values = []
-        for key, value in trading_stats.items():
-            headers.append(key)
-            if isinstance(value, (int, float)):
-                # Round to 4 significant figures using numpy
-                values.append(float(np.format_float_positional(value, precision=4, unique=False, fractional=False, trim="k")))
-            else:
-                # Keep non-numeric values unchanged
-                values.append(value)
+        if table_format == "two_column":
+            # Two-column vertical layout: Metric Name | Value
+            metric_names = []
+            metric_values = []
 
-        # Add trading stats table
-        fig.add_trace(go.Table(header=dict(values=headers), cells=dict(values=values)),
-            row=3,
-            col=1,
-        )
+            for key, value in trading_stats.items():
+                # Format metric name (convert snake_case to Title Case)
+                formatted_key = key.replace('_', ' ').title()
+                metric_names.append(formatted_key)
+                metric_values.append(format_value(value))
+
+            fig.add_trace(go.Table(
+                header=dict(
+                    values=["<b>Metric</b>", "<b>Value</b>"],
+                    fill_color='#2c3e50',
+                    align='left',
+                    font=dict(color='white', size=14)
+                ),
+                cells=dict(
+                    values=[metric_names, metric_values],
+                    fill_color=[['#34495e', '#2c3e50']*len(metric_names)],
+                    align='left',
+                    font=dict(color='white', size=13),
+                    height=25
+                )),
+                row=3,
+                col=1,
+            )
+
+        elif table_format == "multi_row":
+            # Group metrics into categories for better readability
+            categories = {
+                "Performance": ["total_trades", "total_profit", "win_rate", "expectancy"],
+                "Risk-Adjusted": ["sharpe_ratio", "calmar_ratio", "annualized_return", "max_drawdown_percent"],
+                "Win/Loss": ["average_win", "average_loss", "average_win_pct", "average_loss_pct"],
+                "Advanced": ["profit_factor", "max_profit", "max_loss", "average_holding_period"]
+            }
+
+            # Create nicely formatted metric names
+            metric_name_map = {
+                "total_trades": "Trades",
+                "total_profit": "Total P&L ($)",
+                "win_rate": "Win Rate",
+                "expectancy": "Expectancy ($)",
+                "sharpe_ratio": "Sharpe",
+                "calmar_ratio": "Calmar",
+                "annualized_return": "Annual Ret",
+                "max_drawdown_percent": "Max DD (%)",
+                "average_win": "Avg Win ($)",
+                "average_loss": "Avg Loss ($)",
+                "average_win_pct": "Avg Win (%)",
+                "average_loss_pct": "Avg Loss (%)",
+                "profit_factor": "Profit Factor",
+                "max_profit": "Max Win ($)",
+                "max_loss": "Max Loss ($)",
+                "average_holding_period": "Avg Hold Time"
+            }
+
+            # Build column data
+            performance_names = [metric_name_map.get(k, k) for k in categories["Performance"]]
+            performance_values = [format_value(trading_stats.get(k, 0)) for k in categories["Performance"]]
+
+            risk_names = [metric_name_map.get(k, k) for k in categories["Risk-Adjusted"]]
+            risk_values = [format_value(trading_stats.get(k, 0)) for k in categories["Risk-Adjusted"]]
+
+            winloss_names = [metric_name_map.get(k, k) for k in categories["Win/Loss"]]
+            winloss_values = [format_value(trading_stats.get(k, 0)) for k in categories["Win/Loss"]]
+
+            advanced_names = [metric_name_map.get(k, k) for k in categories["Advanced"]]
+            advanced_values = [format_value(trading_stats.get(k, 0)) for k in categories["Advanced"]]
+
+            # Create table with interleaved names and values
+            fig.add_trace(go.Table(
+                header=dict(
+                    values=["<b>Performance</b>", "<b>Risk-Adjusted</b>", "<b>Win/Loss Stats</b>", "<b>Advanced</b>"],
+                    fill_color='#2c3e50',
+                    align='center',
+                    font=dict(color='white', size=14)
+                ),
+                cells=dict(
+                    values=[
+                        # Interleave metric names and values for each column
+                        [f"<b>{name}</b><br>{val}" for name, val in zip(performance_names, performance_values)],
+                        [f"<b>{name}</b><br>{val}" for name, val in zip(risk_names, risk_values)],
+                        [f"<b>{name}</b><br>{val}" for name, val in zip(winloss_names, winloss_values)],
+                        [f"<b>{name}</b><br>{val}" for name, val in zip(advanced_names, advanced_values)]
+                    ],
+                    fill_color='#34495e',
+                    align='center',
+                    font=dict(color='white', size=13),
+                    height=40
+                )),
+                row=3,
+                col=1,
+            )
+
+        else:  # single_row (original format)
+            headers = []
+            values = []
+            for key, value in trading_stats.items():
+                formatted_key = key.replace('_', ' ').title()
+                headers.append(formatted_key)
+                values.append(format_value(value))
+
+            fig.add_trace(go.Table(
+                header=dict(
+                    values=headers,
+                    fill_color='#2c3e50',
+                    align='center',
+                    font=dict(color='white', size=11)
+                ),
+                cells=dict(
+                    values=values,
+                    fill_color='#34495e',
+                    align='center',
+                    font=dict(color='white', size=10),
+                    height=25
+                )),
+                row=3,
+                col=1,
+            )
 
         # Update layout
         fig.update_layout(
-            annotations=[
-            dict(
-                text="Cumulative PnL",
-                x=0.5,
-                y=1.0,
-                xref="paper",
-                yref="paper",
-                showarrow=False,
-                font=dict(size=14, color="white")
-            ),
-            dict(
-                text="OHLC Chart with Trades",
-                x=0.5,
-                y=0.66,
-                xref="paper",
-                yref="paper",
-                showarrow=False,
-                font=dict(size=14, color="white")
-            ),
-            dict(
-                text="Trading Stats",
-                x=0.5,
-                y=0.2,
-                xref="paper",
-                yref="paper",
-                showarrow=False,
-                font=dict(size=14, color="white")
-            ),
-        ],
-
-            title="OHLC Chart with Trades, Cumulative PnL, and Stats",
+            title={
+                'text': "OHLC Chart with Trades, Cumulative PnL, and Stats",
+                'x': 0.5,
+                'xanchor': 'center',
+                'font': {'size': 18, 'color': 'white'}
+            },
             xaxis_title="Date",
             yaxis_title="Price",
             template="plotly_dark",
-            height=1080,
-            showlegend=True
+            height=1200,  # Increased height for better table visibility
+            showlegend=False,  # Hide legend to reduce clutter
+            margin=dict(l=50, r=50, t=80, b=20)
         )
+
+        # Add subplot titles
+        fig.update_xaxes(title_text="", row=1, col=1)
+        fig.update_xaxes(title_text="", row=2, col=1)
+        fig.update_xaxes(title_text="Date", row=3, col=1)
+
+        fig.update_yaxes(title_text="Portfolio Value", row=1, col=1)
+        fig.update_yaxes(title_text="Price", row=2, col=1)
 
         fig.update_xaxes(rangeslider_visible=False)
         fig.show()

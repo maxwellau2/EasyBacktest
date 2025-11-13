@@ -12,6 +12,7 @@ class MyBacktest(BacktestEngine):
     def preprocess_data(self):
         # Custom preprocessing logic
         self.data_stream['moving_avg'] = self.data_stream['close'].rolling(window=100).mean()
+        return self.data_stream
 
     def before_step(self, index, row):
         """
@@ -21,8 +22,6 @@ class MyBacktest(BacktestEngine):
         super().before_step(index, row)  # Retain TP/SL logic
 
         # Additional pre-step actions
-        # adding flags to see if k moved above d
-        self.states['kd_up'] = 1 if row.K > row.D else 0
 
 
 
@@ -57,13 +56,13 @@ if __name__ == "__main__":
 
     # Step 3. import your data from any source in a pandas DataFrame
     # In this case, we fetch historical data for Bitcoin (BTC-USD) using Yahoo Finance
-    btc_data = yf.download('BTC-USD', start='2024-01-01', interval='1h')
-    print(btc_data.head())
+    btc_data = yf.download('BTC-USD', interval='1h')
+    # print(btc_data.head())
     # Ensure that the columns include open, high, low, close and volume
     # rename columns to lowercase, if necessary
     print(btc_data.columns)
     btc_data.columns = [col[0].lower() for col in btc_data.columns]
-
+    print(btc_data)
     # Step 4: Add the data stream to the backtest instance
     backtest.add_data_stream(data_stream=btc_data)
 
