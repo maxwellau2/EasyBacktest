@@ -305,14 +305,26 @@ class BacktestEngine(ABC):
         )
 
         # Add OHLC candlestick chart
+        # fig.add_trace(
+        #     go.Candlestick(
+        #         x=self.data_stream.index,
+        #         open=self.data_stream["open"],
+        #         high=self.data_stream["high"],
+        #         low=self.data_stream["low"],
+        #         close=self.data_stream["close"],
+        #         name="OHLC"
+        #     ),
+        #     row=2,
+        #     col=1
+        # )
+        # due to performance reason, we shall use simple line chart :)
         fig.add_trace(
-            go.Candlestick(
-                x=self.data_stream.index,
-                open=self.data_stream["open"],
-                high=self.data_stream["high"],
-                low=self.data_stream["low"],
-                close=self.data_stream["close"],
-                name="OHLC"
+            go.Scatter(
+            x=self.data_stream.index,
+            y=self.data_stream["close"],
+            mode="lines",
+            line=dict(color="yellow"),
+            name="Close Price"
             ),
             row=2,
             col=1

@@ -1,9 +1,23 @@
 *
 !/.git
 !/.github
-!/easybacktest
+!/easy_backtest
 !/tests
 !Makefile
 !requirements.txt
 !README.md
 !HOWTO.md
+!setup.py
+!build.sh
+# !CLAUDE.md
+# !*.md
+
+# # Ignore build artifacts
+# build/
+# dist/
+# *.egg-info
+# __pycache__/
+# *.pyc
+# *.pyo
+# .coverage
+# *.whl
